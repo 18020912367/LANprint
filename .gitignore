@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# PyInstaller 工作目录与输出产物
+build/client/
+build/server/
+dist/
+*.exe
+*.dll
+*.msi
+
+# 隔离打包依赖（本地缓存，不入库）
+.pydeps/
+
+# 本地测试数据
+.client_test/
+
+# 第三方历史方案源码（RedMon/GPL，不入库）
+build/redmon/
+
+# 日志与临时文件
+*.log
+logs/
