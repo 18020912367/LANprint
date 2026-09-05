@@ -35,10 +35,11 @@
 
 | 组件 | 安装包 | 说明 |
 |---|---|---|
-| 服务端 | ⬇️ [下载 lanprint_server_setup.exe](https://github.com/{OWNER}/LANPrint/releases/latest/download/lanprint_server_setup.exe) | 安装在**连接真实打印机**的电脑上，安装时选择要共享的打印机 |
-| 客户端 | ⬇️ [下载 lanprint_client_setup.exe](https://github.com/{OWNER}/LANPrint/releases/latest/download/lanprint_client_setup.exe) | 安装在**想借用打印**的电脑上，安装时填写服务端 IP / 端口 / 共享名 |
+| 服务端 | ⬇️ [下载 lanprint_server_setup.exe（v1.0.0）](https://github.com/18020912367/LANprint/releases/latest/download/lanprint_server_setup.exe) | 安装在**连接真实打印机**的电脑上，安装时选择要共享的打印机 |
+| 客户端 | ⬇️ [下载 lanprint_client_setup.exe（v1.0.4）](https://github.com/18020912367/LANprint/releases/latest/download/lanprint_client_setup.exe) | 安装在**想借用打印**的电脑上，安装时填写服务端 IP / 端口 / 共享名 |
 
-> `{OWNER}` 为仓库所属用户名占位符，发布时自动替换。
+> 如点击提示 Not Found：需先在仓库 [Releases](../../releases) 页发布一个 Release
+> （tag 建议 `v1.0.4`），并把上方两个安装包作为附件上传，`/releases/latest` 链接才会生效。
 > 详细使用步骤见 [使用手册](./docs/使用手册.md)。
 
 ## 快速开始
