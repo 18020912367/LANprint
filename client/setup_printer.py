@@ -241,6 +241,19 @@ _AddPrinterW.restype = wintypes.HANDLE
 _AddPrinterW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD,
                          ctypes.POINTER(_PrinterInfo2W)]
 
+# 同名打印机被删除后由后台异步释放，期间立即重建会返回该错误码（需短暂重试）
+_ERROR_PRINTER_ALREADY_EXISTS = 1802
+_CREATE_RETRY_TIMES = 5
+_CREATE_RETRY_INTERVAL_SEC = 0.6
+
+
+class PrinterOpError(RuntimeError):
+    """打印机创建失败，winerror 为对应 Win32 错误码。"""
+
+    def __init__(self, message: str, winerror: int = 0):
+        super().__init__(message)
+        self.winerror = winerror
+
 
 def _add_printer(display_name: str, port_name: str,
                  driver_name: str) -> wintypes.HANDLE:
@@ -253,21 +266,34 @@ def _add_printer(display_name: str, port_name: str,
     info.pDatatype = "RAW"
     handle = _AddPrinterW(None, 2, ctypes.byref(info))
     if not handle:
-        raise RuntimeError(
-            "AddPrinterW 失败（系统错误码 %d）" % ctypes.get_last_error())
+        code = ctypes.get_last_error()
+        raise PrinterOpError("AddPrinterW 失败（系统错误码 %d）" % code, code)
     return handle
 
 
 def create_printer(display_name: str) -> None:
-    """创建虚拟打印机（驱动 Microsoft Print To PDF，端口 LANPRINT）。"""
+    """创建虚拟打印机（驱动 Microsoft Print To PDF，端口 LANPRINT）。
+
+    同名旧打印机可能仍在后台异步释放，遇 ERROR_PRINTER_ALREADY_EXISTS
+    时短暂重试，避免覆盖安装/重注册时报错（1802）。
+    """
     _ensure_driver()
-    try:
-        handle = _add_printer(display_name, PORT_NAME, PRINTER_DRIVER)
-    except Exception as e:
-        raise RuntimeError(
-            "创建打印机 [%s] 失败: %s" % (display_name, e)) from e
-    win32print.ClosePrinter(handle)
-    log.info("虚拟打印机已创建: %s -> 端口 %s", display_name, PORT_NAME)
+    for attempt in range(_CREATE_RETRY_TIMES):
+        try:
+            handle = _add_printer(display_name, PORT_NAME, PRINTER_DRIVER)
+        except PrinterOpError as e:
+            if (e.winerror != _ERROR_PRINTER_ALREADY_EXISTS
+                    or attempt == _CREATE_RETRY_TIMES - 1):
+                raise RuntimeError(
+                    "创建打印机 [%s] 失败: %s" % (display_name, e)) from e
+            time.sleep(_CREATE_RETRY_INTERVAL_SEC)
+            continue
+        except Exception as e:  # 其他错误立即失败，不做无谓重试
+            raise RuntimeError(
+                "创建打印机 [%s] 失败: %s" % (display_name, e)) from e
+        win32print.ClosePrinter(handle)
+        log.info("虚拟打印机已创建: %s -> 端口 %s", display_name, PORT_NAME)
+        return
 
 
 def _ensure_driver() -> None:

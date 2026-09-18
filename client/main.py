@@ -32,7 +32,7 @@ from client import notify, setup_printer, uploader
 
 # 修复 exe 后需递增版本号（并与 installer\client.iss 的 MyAppVersion 同步），
 # 便于用户通过 version 子命令确认已更新到新构建
-CLIENT_VERSION = "1.0.4"
+CLIENT_VERSION = "1.0.5"
 LOG = "lanprint.client"
 
 # capture 拒绝处理的过小数据（端口监视器偶发空任务的防御）

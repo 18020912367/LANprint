@@ -17,7 +17,7 @@
 #define MyAppName "LANPrint 客户端"
 #define MyAppNameEn "LANPrint Client"
 #define MyAppExeName "lanprint_client.exe"
-#define MyAppVersion "1.0.4"
+#define MyAppVersion "1.0.5"
 
 [Setup]
 AppId={{B7D41A62-9C53-4F2E-A1D8-6E4B2C9F0A75}
@@ -220,11 +220,27 @@ begin
                    Content, False);
 end;
 
+// 结束正在运行的客户端进程（忽略失败：进程可能不存在）
+procedure StopClientProcesses;
+var
+  ResCode: Integer;
+begin
+  Exec('taskkill.exe', '/F /IM ' + ExpandConstant('{#MyAppExeName}'),
+       '', SW_HIDE, ewWaitUntilTerminated, ResCode);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResCode: Integer;
   CmdLine: String;
 begin
+  if CurStep = ssInstall then
+  begin
+    // 覆盖安装的关键时序：文件复制前必须结束仍在运行的旧 agent，
+    // 否则 lanprint_client.exe 被占用，替换时报 DeleteFile failed; code 5（拒绝访问）
+    StopClientProcesses;
+    Sleep(500);                        // 等待文件句柄释放
+  end;
   if CurStep = ssPostInstall then
   begin
     WriteStartVbs;
@@ -242,15 +258,6 @@ begin
           mbError, MB_OK);
     end;
   end;
-end;
-
-// 结束正在运行的客户端进程（忽略失败：进程可能不存在）
-procedure StopClientProcesses;
-var
-  ResCode: Integer;
-begin
-  Exec('taskkill.exe', '/F /IM ' + ExpandConstant('{#MyAppExeName}'),
-       '', SW_HIDE, ewWaitUntilTerminated, ResCode);
 end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
