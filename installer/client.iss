@@ -17,7 +17,7 @@
 #define MyAppName "LANPrint 客户端"
 #define MyAppNameEn "LANPrint Client"
 #define MyAppExeName "lanprint_client.exe"
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.0.6"
 
 [Setup]
 AppId={{B7D41A62-9C53-4F2E-A1D8-6E4B2C9F0A75}
@@ -54,6 +54,13 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
     ValueType: string; ValueName: "LANPrintClient"; \
     ValueData: "wscript.exe ""{app}\start_agent_hidden.vbs"""; \
     Flags: uninsdeletevalue
+
+[Icons]
+; 开始菜单入口：手动快速启动后台代理（agent 未自启/被结束时的恢复手段）
+Name: "{group}\LANPrint 后台代理"; Filename: "wscript.exe"; \
+    Parameters: """{app}\start_agent_hidden.vbs"""; \
+    IconFilename: "{app}\{#MyAppExeName}"; \
+    Comment: "手动启动 LANPrint 后台代理（托盘状态与通知）"
 
 [Run]
 ; 后台启动常驻代理（无窗口，托盘状态与通知）——注册已在 ssPostInstall 自动完成

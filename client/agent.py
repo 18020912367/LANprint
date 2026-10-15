@@ -28,7 +28,7 @@ import win32gui
 from PIL import Image, ImageDraw
 
 from common import protocol
-from client import notify, uploader
+from client import autostart, notify, uploader
 
 log = logging.getLogger("lanprint.client")
 
@@ -46,6 +46,7 @@ WM_TRAY = win32con.WM_APP + 1
 WM_STATE = win32con.WM_APP + 2     # 主循环 → UI 线程：更新状态
 CMD_RESEND = 1001
 CMD_QUIT = 1002
+CMD_DIAG = 1003
 
 _STATE_COLORS = {
     ST_ONLINE: (46, 204, 113, 255),     # 绿
@@ -106,7 +107,9 @@ def _hicon_from_ico(data: bytes) -> int:
 class TrayIcon:
     """托盘图标（独立线程跑消息循环）。"""
 
-    def __init__(self):
+    def __init__(self, cfg: dict):
+        # cfg 供托盘菜单动作使用（重发/诊断均在后台线程执行）
+        self._cfg = cfg
         ico_bytes = [_make_icon_ico(_STATE_COLORS[i])
                      for i in (ST_ONLINE, ST_OFFLINE, ST_STASHED)]
         self._icons = [_hicon_from_ico(data) for data in ico_bytes]
@@ -144,6 +147,8 @@ class TrayIcon:
         elif msg == win32con.WM_COMMAND:
             if wparam == CMD_RESEND:
                 self._request_resend()
+            elif wparam == CMD_DIAG:
+                self._request_diagnose()
             elif wparam == CMD_QUIT:
                 win32gui.PostQuitMessage(0)
         elif msg == win32con.WM_DESTROY:
@@ -164,6 +169,7 @@ class TrayIcon:
         menu = win32gui.CreatePopupMenu()
         win32gui.AppendMenu(menu, win32con.MF_STRING, CMD_RESEND,
                             "立即重发暂存任务")
+        win32gui.AppendMenu(menu, win32con.MF_STRING, CMD_DIAG, "诊断")
         win32gui.AppendMenu(menu, win32con.MF_SEPARATOR, 0, "")
         win32gui.AppendMenu(menu, win32con.MF_STRING, CMD_QUIT, "退出")
         win32gui.SetForegroundWindow(hwnd)
@@ -174,7 +180,12 @@ class TrayIcon:
 
     def _request_resend(self):
         # 在后台线程处理，避免阻塞 UI 线程
-        threading.Thread(target=_resend_worker, daemon=True).start()
+        threading.Thread(target=_resend_worker, args=(self._cfg,),
+                         daemon=True).start()
+
+    def _request_diagnose(self):
+        threading.Thread(target=_diagnose_worker, args=(self._cfg,),
+                         daemon=True).start()
 
     # ---- 跨线程 ----
     def set_state(self, state: int) -> None:
@@ -329,6 +340,67 @@ def _count_stashed(cfg: dict) -> int:
     return len(list(Path(cfg["offline_dir"]).glob("*.json")))
 
 
+def _port_listening(port: int) -> bool:
+    """探测本机回环接收端口是否处于监听（连上即关，无业务副作用）。"""
+    try:
+        with socket.create_connection((REDIRECT_HOST, port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
+def _diagnose_worker(cfg: dict) -> None:
+    """托盘"诊断"：逐项自检并弹窗汇报结果（后台线程执行）。"""
+    fixed, broken = autostart.check_and_repair()
+    if broken:
+        auto_line = "异常：" + "；".join(broken)
+    elif fixed:
+        auto_line = "已自动修复（%s）" % "；".join(fixed)
+    else:
+        auto_line = "已配置（%s）" % autostart.DELAY_HINT
+    server_line = "在线" if Agent(cfg)._ping() \
+        else "离线（检查服务端电脑、网络与防火墙）"
+    port = int(cfg.get("local_tcp_port", 9100))
+    listener_line = "监听中" if _port_listening(port) \
+        else "未监听（重启后台代理可恢复）"
+    lines = [
+        "1. 开机自启动：%s" % auto_line,
+        "2. 服务端 %s:%s：%s"
+        % (cfg["server_host"], cfg["server_port"], server_line),
+        "3. 本机接收端口 %d：%s" % (port, listener_line),
+        "4. 暂存待重发任务：%d 条" % _count_stashed(cfg),
+    ]
+    notify.message_box("LANPrint 诊断结果", "\n".join(lines))
+
+
+def _autostart_selfcheck() -> None:
+    """启动时自检开机自启动配置：能修的自动修，修不了的弹窗告知。
+
+    背景：部分安全软件/系统清理工具会删除登录启动项；若不处理，
+    下次开机 agent 将不会启动。进程无法感知"自己没有启动"，
+    因此只能利用"本次已成功启动"的机会自检并修复，供下次开机生效。
+    """
+    try:
+        fixed, broken = autostart.check_and_repair()
+    except Exception as e:
+        log.warning("agent: 自启动自检失败（%s）", e)
+        return
+    for item in fixed:
+        log.info("agent: 自启动自检：%s", item)
+    for item in broken:
+        log.warning("agent: 自启动自检：%s", item)
+    if broken:
+        notify.notify_user(
+            "LANPrint 开机自启动异常",
+            "检测到自启动配置问题：\n%s\n\n修复前，重启电脑后打印代理"
+            "不会自动启动（打印功能不可用）。" % "\n".join(broken),
+            level="error")
+    elif fixed:
+        notify.notify_user(
+            "LANPrint 开机自启动已修复",
+            "%s。下次开机将自动恢复后台代理。" % "；".join(fixed))
+
+
 def _resend_worker(cfg: dict) -> int:
     """重发所有暂存任务，返回处理条数（托盘菜单线程/主循环调用）。"""
     offline = Path(cfg["offline_dir"])
@@ -418,12 +490,14 @@ def run_agent(cfg: dict) -> int:
     agent = Agent(cfg)
     tray = None
     try:
-        tray = TrayIcon()
+        tray = TrayIcon(cfg)
     except Exception as e:
         # 托盘失败不阻断后台职责
         log.warning("agent: 托盘初始化失败（%s），以无图标模式运行", e)
     log.info("agent: 已启动（服务端 %s:%s）",
              cfg["server_host"], cfg["server_port"])
+    # 开机自启动配置自检：被安全软件清理时自动修复并告知用户
+    _autostart_selfcheck()
     try:
         redirect = RedirectListener(cfg, agent._stop)
         redirect.start()
